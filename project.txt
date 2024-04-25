@@ -1,0 +1,2567 @@
+.model small
+.stack 100h
+
+.data
+	boardx WORD 110
+	boardy WORD 190
+	width1 WORD 85
+	height1 WORD 4
+	
+	i WORD ?
+	j WORD ?
+	k WORD ?
+	l WORD ?
+	
+	speed WORD 8
+	
+	running WORD 1
+	
+	ballx WORD 150
+	bally WORD 140
+	ballr WORD 5
+	ballvx WORD 4
+	ballvy WORD -4
+	
+	brickh WORD 15
+	brickpos WORD 40
+	numrows WORD 2
+	brickhits WORD 10 dup(0)
+	brickhitnum BYTE 1
+	brickrem WORD 10
+	brickcolour BYTE 10 dup(0)
+	
+	color1 BYTE 37d
+	color2 BYTE 44d
+	color3 BYTE 24d
+	color4 BYTE 111d		;fixed brick
+	color5 BYTE 15d			;special brick
+	
+	numoflives WORD 3
+	
+	score1 BYTE 'Score:', '$'
+	score2 BYTE 0
+	highscore BYTE 0
+	
+	levelstring BYTE 'Level:', '$'
+	levelnum BYTE 1
+	
+	file BYTE 'scores.txt', 0
+	handle WORD 0
+	buffer BYTE 100 dup(0), '$'
+	
+	; Page 1
+	
+	pg1name1 db "BRICK BREAKER GAME ;)",'$'
+	msg1 DB 'Enter your name: ', '$'
+	pg1name2 DB 100 dup('$')
+	var1 DW 30
+	var2 DW 30
+	var3 DW 30
+	
+	; Page 2
+	
+	x DW 30
+	y DW 30
+	s1 DW 30
+	s2 DW 60
+	s3 DW 90
+	s4 DW 120
+	s5 DW 150
+	options DW 0
+	pg2name1 DB "name",'$'
+	pg2name2 DB "new game", '$'
+	pg2name3 DB "resume", '$'
+	pg2name4 DB "instructions", '$'
+	pg2name5 DB "high score", '$'
+	pg2name6 DB "exit", '$'
+	
+	; Instructions
+	
+	instruct1 DB " HOW TO PLAY !!! ",'$'
+	instruct2 DB " 1. Move ball with the help of paddle. ", '$'
+	instruct3 DB " 2. Eliminate as many bricks as possible. ", '$'
+	instruct4 DB " 3. Ball SHOULDN'T touch the platform. ", '$'
+	instruct5 DB "Enjoy Playing ;)", '$'
+	
+	; Still
+	
+	still DB " Game Paused .... ",'$'
+	ispaused DB 0
+	
+	; Win
+	
+	winname1 DB " Congrgulations !!!!! ",'$'
+	winname2 DB " You've won :) ", '$'
+
+.code
+
+main proc
+		mov ax, @data
+		mov ds, ax
+		mov ah, 00h
+		mov al, 13h
+		int 10h
+		
+		call readFile
+		
+		call RandomColours
+		
+		call page1
+		
+	mainmenu:
+		call page2
+	exitmenu::
+	
+		mov ax, options
+		
+		cmp ax, 0
+		je mainmenu
+		
+		cmp ax, 2
+		je mainmenu
+		
+		cmp ax, 4
+		jne endinstruct
+		call instruction
+		jmp mainmenu
+	endinstruct:
+	
+		cmp ax, 5
+		je mainmenu
+		
+		cmp ax, 6
+		je exit
+
+	l1:
+		mov al, 0
+		cmp ispaused, al
+		je l2
+		call pause
+	
+	l2:
+		call clearBg
+		call drawBoard
+		call drawBall
+		call GameScore
+		call printLevel
+		call Lives
+		call DrawBrick
+		call moveBoard
+		call moveBall
+		
+		call delay
+
+		mov ax, 0
+		cmp ax, running
+		je endgame		
+		jmp l1
+		
+	endgame:
+	
+		mov ax, brickrem
+		cmp ax, 0
+		jne skipwin
+		call winner
+	skipwin:
+	
+		call FileHandling
+		
+	exit:
+		mov al, 0
+		mov ah, 4ch
+		int 21h
+main endp
+
+printarr proc
+		mov ax, 0
+		mov i, ax
+	l1:
+		mov ax, 10
+		cmp i, ax
+		jae l2
+		
+		mov si, OFFSET brickhits
+		mov ax, i
+		add si, ax
+		mov ax, [si]
+		mov dl, al
+		add dl, 48
+		mov ah, 02h
+		int 21h
+		
+		inc i
+		jmp l1
+	l2:
+	
+		mov dl, 10
+		mov ah, 02h
+		int 21h
+		
+		ret
+printarr endp
+
+delay proc
+		mov cx, 0
+		mov dx, 9999h
+		mov ah, 86h
+		int 15h
+		ret
+delay endp
+
+clearBg proc
+
+		mov ah, 06h
+		mov al, 0
+		mov cx, 0
+		mov dh, 80
+		mov dl, 80
+		mov bh, 104d
+		int 10h
+
+		ret
+clearBg endp
+
+drawBoard proc
+		mov ax, boardx
+		mov i, ax
+		mov bx, boardy
+		mov j, bx
+
+	l1:
+		mov bx, boardx
+		mov i, bx
+		
+	l2:
+		mov ah, 0ch
+		mov al, 07h
+		mov cx, i
+		mov dx, j
+		int 10h
+		mov ah, 1h
+		int 16h
+		
+		inc i
+		mov bx, boardx
+		add bx, width1
+		cmp i, bx
+		jne l2
+		je l3
+
+	l3:
+		inc j
+		mov bx, boardy
+		add bx, height1
+		cmp j, bx
+		jne l1
+
+		ret
+drawBoard endp
+
+drawBall proc
+		mov ax, ballx
+		sub ax, ballr
+		mov i, ax		; i = x - r
+	
+	l1:
+	
+		mov ax, ballx
+		add ax, ballr
+		cmp i, ax		; for i <= x + r
+		ja l1end
+		
+		mov ax, bally
+		sub ax, ballr
+		mov j, ax		; j = y - r
+	
+	l2:
+	
+		mov ax, bally
+		add ax, ballr
+		cmp j, ax		; for j <= y + r
+		ja l2end
+		
+		mov ax, i
+		sub ax, ballx
+		mov bx, ax
+		mul bx
+		mov cx, ax
+		mov ax, j
+		sub ax, bally
+		mov bx, ax
+		mul bx
+		add cx, ax		; (i - x)^2 + (j - y)^2
+		mov ax, ballr
+		mov bx, ax
+		mul bx
+		cmp ax, cx		; if r^2 > (i - x)^2 + (j - y)^2
+		jbe l3
+		
+		mov ah, 0ch
+		mov al, 0ch
+		mov cx, i
+		mov dx, j
+		int 10h
+		mov ah, 1h
+		int 16h
+		
+	l3:
+		
+		inc j
+		jmp l2
+		
+	l2end:
+		
+		inc i
+		jmp l1
+		
+	l1end:
+	
+		ret
+	
+drawBall endp
+
+drawBrick proc
+		mov ax, 0
+		mov l, ax
+	
+	l0:
+		mov ax, numrows
+		cmp l, ax
+		jae l0end
+
+		mov ax, 0
+		mov i, ax
+		
+	l1:
+		mov ax, 5
+		cmp i, ax
+		jae l1end
+		
+		mov ax, i
+		mov bx, 64
+		mul bx
+		mov j, ax
+		
+	l2:
+		mov ax, i
+		mov bx, 64
+		mul bx
+		add ax, 62
+		cmp j, ax
+		ja l2end
+		
+		mov ax, l
+		mov bx, brickh
+		mul bx
+		add ax, brickpos
+		;mov ax, brickpos
+		mov k, ax
+		
+	l3:
+		mov ax, l
+		add ax, 1
+		mov bx, brickh
+		mul bx
+		sub ax, 1
+		add ax, brickpos
+		cmp k, ax
+		jae l3end
+		
+		; brick index = l * 5 + i
+		mov ax, l
+		mov bx, 5
+		mul bx
+		add ax, i
+		mov si, OFFSET brickhits
+		add si, ax
+		mov ax, [si]
+		cmp al, brickhitnum
+		jae skipdraw		; if brick has been broken
+		
+		mov ax, l
+		mov bx, 5
+		mul bx
+		add ax, i
+		mov si, OFFSET brickcolour
+		add si, ax
+		
+		mov ah, 0ch
+		mov al, [si]
+		mov cx, j
+		mov dx, k
+		int 10h
+		mov ah, 1h
+		int 16h
+		
+	skipdraw:
+		
+		inc k
+		jmp l3
+	l3end:
+		
+		inc j
+		jmp l2
+		
+	l2end:	
+		
+		inc i	
+		jmp l1	
+		
+	l1end:
+	
+		inc l
+		jmp l0
+	
+	l0end:
+
+		ret
+drawBrick endp
+
+moveBoard proc
+
+		mov ah, 1h
+		int 16h
+		jz exit
+
+		mov ah, 0h
+		int 16h
+		mov al, ah
+		
+		cmp al, 4dh
+		je right
+
+		cmp al, 4bh
+		je left
+		
+		cmp al, 39h
+		je space
+
+		jmp exit
+
+	right:
+		mov ax, boardx
+		add ax, width1
+		cmp ax, 320
+		jb moveRight
+		mov ax, 320
+		sub ax, width1
+		mov boardx, ax
+		jmp exit
+		
+	moveRight:		
+		mov ax, boardx
+		add ax, speed
+		mov boardx, ax
+		jmp exit
+
+	left:
+		mov ax, boardx
+		sub ax, speed
+		mov bx, boardx
+		add bx, width1
+		cmp ax, bx
+		jb moveLeft
+		mov ax, 0
+		mov boardx, ax
+		jmp exit
+		
+	moveLeft:		
+		mov ax, boardx
+		sub ax, speed
+		mov boardx, ax
+		jmp exit
+		
+	space:
+		mov al, 1
+		mov ispaused, al
+		jmp exit
+
+	exit:
+
+		ret
+moveBoard endp
+
+moveBall proc
+
+		mov ax, ballx
+		add ax, ballvx
+		mov ballx, ax		; x += vx
+		
+		mov ax, bally
+		add ax, ballvy
+		mov bally, ax		; y += vy
+		
+		mov ax, ballx		; Left Wall
+		sub ax, ballr
+		mov bx, ballx
+		add bx, ballr
+		cmp ax, bx			; if x - r > x + r
+		jbe l1
+		
+		mov ax, 0
+		add ax, ballr
+		mov ballx, ax		; x = r
+		mov ax, 0
+		sub ax, ballvx
+		mov ballvx, ax		; vx = -vx
+		
+		jmp enddraw
+		
+	l1:
+	
+		mov ax, ballx		; Right Wall
+		add ax, ballr
+		cmp ax, 320			; if x + r >= 320
+		jb l2
+		
+		mov ax, 320
+		sub ax, ballr
+		mov ballx, ax		; x = 320 - r
+		mov ax, 0
+		sub ax, ballvx
+		mov ballvx, ax		; vx = -vx
+		
+		jmp enddraw
+		
+	l2:
+	
+		mov ax, bally		; Top
+		sub ax, ballr
+		mov bx, bally
+		add bx, ballr
+		cmp ax, bx			; if y - r > y + r
+		jbe l3
+		
+		mov ax, 0
+		add ax, ballr
+		mov bally, ax		; y = r
+		mov ax, 0
+		sub ax, ballvy
+		mov ballvy, ax		; vy = -vy
+		
+		jmp enddraw
+		
+	l3:
+	
+		mov ax, bally		; Floor
+		add ax, ballr
+		cmp ax, 200			; if y + r >= 200
+		jb l4
+		
+		mov ax, 200
+		sub ax, ballr
+		mov bally, ax		; y = 200 - r
+		mov ax, 0
+		sub ax, ballvy
+		mov ballvy, ax		; vy = -vy
+		call ReduceLives	; Match lost
+		
+		jmp enddraw
+		
+	l4:
+	
+		mov ax, bally
+		add ax, ballr
+		add ax, ballvy
+		cmp ax, boardy		; y + r + vy >= boardy	Bottom is below board
+		jb l5
+		
+		mov ax, bally
+		cmp ax, boardy		; y < boardy	Center is above board
+		jae l5
+		
+		mov ax, ballx
+		add ax, ballr
+		cmp ax, boardx		; x + r >= boardx	Right side is above board
+		jb l5
+		
+		mov ax, ballx
+		sub ax, ballr
+		mov bx, boardx
+		add bx, width1
+		cmp ax, bx			; x - r <= boardx + w	Left side is above board
+		ja l5
+		
+		mov ax, boardy
+		sub ax, ballr
+		mov bally, ax		; y = boardy - r
+		mov ax, 0
+		sub ax, ballvy
+		mov ballvy, ax		; vy = -vy
+		
+		jmp enddraw
+
+	l5:
+	
+		mov ax, 0
+		mov l, ax
+	
+	l5a:
+		mov ax, numrows
+		cmp l, ax
+		jae l5aend
+
+		mov ax, 0
+		mov i, ax
+		
+	l5b:
+		mov ax, 5
+		cmp i, ax
+		jae l5bend
+		
+		mov ax, l
+		mov bx, 5
+		mul bx
+		add ax, i		; brick index = l * 5 + i
+		mov si, OFFSET brickhits
+		add si, ax
+		mov ax, [si]
+		cmp al, brickhitnum		; brick has been destroyed
+		jae skipcollision
+		
+		;(x1, x2, y1, y2) = (32i, 32i+30, lh+p, h(l+1)+p-2)
+		; Bottom Side
+		
+		mov ax, bally
+		sub ax, ballr
+		add ax, ballvy
+		mov bx, ax
+		mov ax, l
+		add ax, 1
+		mul brickh
+		add ax, brickpos
+		sub ax, 2
+		cmp bx, ax		; y - r + vy <= y2	Top is above brick
+		ja bottom
+		
+		mov bx, bally
+		mov ax, l
+		add ax, 1
+		mul brickh
+		add ax, brickpos
+		sub ax, 2
+		cmp bx, ax		; y > y2	Center is below brick
+		jbe bottom
+		
+		mov ax, ballx
+		add ax, ballr
+		mov bx, ax
+		mov ax, 64
+		mul i
+		cmp bx, ax		; x + r >= x1	Right side is below brick
+		jb bottom
+		
+		mov ax, ballx
+		sub ax, ballr
+		mov bx, ax
+		mov ax, 64
+		mul i
+		add ax, 62
+		cmp bx, ax			; x - r <= x2	Left side is below brick
+		ja bottom
+		
+		mov ax, l
+		add ax, 1
+		mul brickh
+		add ax, brickpos
+		sub ax, 2
+		add ax, ballr
+		mov bally, ax		; y = y2 + r
+		mov ax, 0
+		sub ax, ballvy
+		mov ballvy, ax		; vy = -vy
+		
+		mov di, offset brickcolour
+		mov ax, l
+		mov bx, 5
+		mul bx
+		add ax, i	
+		add di, ax
+		mov al, color4
+		cmp [di], al		; If brick is fixed
+		je enddraw
+
+        mov al, color5
+        cmp [di], al        ; Special Brick
+        jne spcbrk1
+        mov ah, 0
+        mov al, brickhitnum
+        mov [si], ax
+        dec brickrem
+        call destroyBricks
+        jmp enddraw
+    spcbrk1:
+		
+		mov ax, 1
+		add [si], ax		; Increase brickhit
+		
+		mov bx, 1
+		add [di], bx		; Increase color
+		
+		mov al, brickhitnum
+		cmp [si], al
+		jne enddraw
+		
+		call incScore
+
+		;call printarr
+		
+		jmp enddraw
+		
+	bottom:
+	
+		;(x1, x2, y1, y2) = (32i, 32i+30, lh+p, h(l+1)+p-2)
+		; Top Side
+		
+		mov ax, bally
+		add ax, ballr
+		add ax, ballvy
+		mov bx, ax
+		mov ax, l
+		mul brickh
+		add ax, brickpos
+		cmp bx, ax		; y + r + vy >= y1	Bottom is below brick
+		jb top
+		
+		mov bx, bally
+		mov ax, l
+		mul brickh
+		add ax, brickpos
+		cmp bx, ax		; y < y1	Center is above brick
+		ja top
+		
+		mov ax, ballx
+		add ax, ballr
+		mov bx, ax
+		mov ax, 64
+		mul i
+		cmp bx, ax		; x + r >= x1	Right side is below brick
+		jb top
+		
+		mov ax, ballx
+		sub ax, ballr
+		mov bx, ax
+		mov ax, 64
+		mul i
+		add ax, 62
+		cmp bx, ax			; x - r <= x2	Left side is below brick
+		ja top
+		
+		mov ax, l
+		mul brickh
+		add ax, brickpos
+		sub ax, ballr
+		mov bally, ax		; y = y1 - r
+		mov ax, 0
+		sub ax, ballvy
+		mov ballvy, ax		; vy = -vy
+		
+		mov di, offset brickcolour
+		mov ax, l
+		mov bx, 5
+		mul bx
+		add ax, i	
+		add di, ax
+		mov al, color4
+		cmp [di], al		; If brick is fixed
+		je enddraw
+
+        mov al, color5
+        cmp [di], al        ; Special Brick
+        jne spcbrk2
+        mov ah, 0
+        mov al, brickhitnum
+        mov [si], ax
+        dec brickrem
+        call destroyBricks
+        jmp enddraw
+    spcbrk2:
+		
+		mov ax, 1
+		add [si], ax		; Increase brickhit
+		
+		mov bx, 1
+		add [di], bx		; Increase color
+		
+		mov al, brickhitnum
+		cmp [si], al
+		jne enddraw
+		call incScore
+		
+		jmp enddraw
+		
+	top:
+	
+		;(x1, x2, y1, y2) = (32i, 32i+30, lh+p, h(l+1)+p-2)
+		; Left Side
+		
+		mov ax, ballx
+		add ax, ballr
+		add ax, ballvx
+		mov bx, ax
+		mov ax, 64
+		mul i
+		cmp bx, ax		; x + r + vx >= x1	Right is right of brick
+		jb left
+		
+		mov bx, ballx
+		mov ax, 64
+		mul i
+		cmp bx, ax		; x <= x1	Center is left of brick
+		ja left
+		
+		mov ax, bally
+		add ax, ballr
+		mov bx, ax
+		mov ax, l
+		mul brickh
+		add ax, brickpos
+		cmp bx, ax		; y + r >= y1	Bottom is below brick top
+		jb left
+		
+		mov ax, bally
+		sub ax, ballr
+		mov bx, ax
+		mov ax, l
+		add ax, 1
+		mul brickh
+		add ax, brickpos
+		sub ax, 2
+		cmp bx, ax			; y - r <= y2	Top is above brick bottom
+		ja left
+		
+		mov ax, 64
+		mul i
+		sub ax, ballr
+		mov ballx, ax		; x = x1 - r
+		mov ax, 0
+		sub ax, ballvx
+		mov ballvx, ax		; vx = -vx
+		
+		mov di, offset brickcolour
+		mov ax, l
+		mov bx, 5
+		mul bx
+		add ax, i	
+		add di, ax
+		mov al, color4
+		cmp [di], al		; If brick is fixed
+		je enddraw
+
+        mov al, color5
+        cmp [di], al        ; Special Brick
+        jne spcbrk3
+        mov ah, 0
+        mov al, brickhitnum
+        mov [si], ax
+        dec brickrem
+        call destroyBricks
+        jmp enddraw
+    spcbrk3:
+		
+		mov ax, 1
+		add [si], ax		; Increase brickhit
+		
+		mov bx, 1
+		add [di], bx		; Increase color
+		
+		mov al, brickhitnum
+		cmp [si], al
+		jne enddraw
+		call incScore
+		
+		jmp enddraw
+		
+	left:
+	
+		;(x1, x2, y1, y2) = (32i, 32i+30, lh+p, h(l+1)+p-2)
+		; Right Side
+		
+		mov ax, ballx
+		sub ax, ballr
+		add ax, ballvx
+		mov bx, ax
+		mov ax, 64
+		mul i
+		add ax, 62
+		cmp bx, ax		; x - r + vx <= x2	Left side is left of brick
+		ja right
+		
+		mov bx, ballx
+		mov ax, 64
+		mul i
+		add ax, 62
+		cmp bx, ax		; x >= x2	Center is right of brick
+		jb right
+		
+		mov ax, bally
+		add ax, ballr
+		mov bx, ax
+		mov ax, l
+		mul brickh
+		add ax, brickpos
+		cmp bx, ax		; y + r >= y1	Bottom is below brick top
+		jb right
+		
+		mov ax, bally
+		sub ax, ballr
+		mov bx, ax
+		mov ax, l
+		add ax, 1
+		mul brickh
+		add ax, brickpos
+		sub ax, 2
+		cmp bx, ax			; y - r <= y2	Top is above brick bottom
+		ja right
+		
+		mov ax, 64
+		mul i
+		add ax, 62
+		add ax, ballr
+		mov ballx, ax		; x = x2 + r
+		mov ax, 0
+		sub ax, ballvx
+		mov ballvx, ax		; vx = -vx
+		
+		mov di, offset brickcolour
+		mov ax, l
+		mov bx, 5
+		mul bx
+		add ax, i	
+		add di, ax
+		mov al, color4
+		cmp [di], al		; If brick is fixed
+		je enddraw
+
+        mov al, color5
+        cmp [di], al        ; Special Brick
+        jne spcbrk4
+        mov ah, 0
+        mov al, brickhitnum
+        mov [si], ax
+        dec brickrem
+        call destroyBricks
+        jmp enddraw
+    spcbrk4:
+		
+		mov ax, 1
+		add [si], ax		; Increase brickhit
+		
+		mov bx, 1
+		add [di], bx		; Increase color
+		
+		mov al, brickhitnum
+		cmp [si], al
+		jne enddraw
+		call incScore
+		
+		jmp enddraw
+		
+	right:
+	
+	skipcollision:
+		
+		inc i
+		jmp l5b
+		
+	l5bend:
+	
+		inc l
+		jmp l5a
+		
+	l5aend:
+	
+	enddraw:
+		mov ax, brickrem
+		cmp ax, 0
+		jne skip
+		mov al, levelnum
+		cmp al, 1
+		jne l6
+		call Level2
+		jmp skip
+		
+	l6:
+		mov al, levelnum
+		cmp al, 2
+		jne l7
+		call Level3
+		jmp skip
+	
+	l7:	
+		mov running, 0
+	skip:
+
+		ret
+moveBall endp
+
+GameScore proc
+		mov ah, 02h
+		mov bx, 0
+		mov dh, 2
+		mov dl, 0 
+		int 10h
+
+		lea dx, score1		;to print string
+		mov ah, 09h
+		int 21h
+		
+		mov ah, 02h			; to print score number
+		mov bx, 0
+		mov dh, 2
+		mov dl, 6
+		int 10h
+		
+		mov ah, 0			
+		mov al, score2
+		mov bl, 10			;so it could accept two digit number
+		div bl
+		
+		mov bl, ah
+		
+		mov dl, al
+		mov ah, 02h
+		add dl, 48
+		int 21h
+		
+		mov dl, bl
+		mov ah, 02h
+		add dl, 48
+		int 21h
+
+		ret
+GameScore endp	
+
+Lives proc
+		mov ax, 0
+		mov i, ax
+	l1:
+		mov ax, numoflives
+		cmp i, ax
+		jae l2
+		
+		mov ax, 2
+		mul i
+		add ax, 34
+		mov dx, ax
+		
+		mov ah, 02h
+		mov bx, 0
+		mov dh, 2
+		;mov dl, 34
+		int 10h
+			
+		mov dl, 3		;ascii of heart
+		mov ah, 02h
+		int 21h
+		
+		inc i
+		
+		jmp l1
+	l2:
+		ret
+Lives endp
+
+ReduceLives proc
+		mov ax, numoflives
+		cmp ax, 0
+		je l1
+		dec numoflives
+		mov ballx, 150
+		mov bally, 140
+		
+		mov al, levelnum
+		cmp al, 1
+		jne ballspeed1
+		
+		mov ballvx, 4
+		mov ballvy, -4
+	
+	ballspeed1:	
+		
+		cmp al, 2
+		jne ballspeed2
+		
+		mov ballvx, 5
+		mov ballvy, -5
+		
+	ballspeed2:	
+		
+		cmp al, 3
+		jne ballspeed3
+		
+		mov ballvx, 6
+		mov ballvy, -6
+		
+	ballspeed3:		
+		
+		jmp l2
+		
+	l1:	
+		mov running, 0
+	l2:
+		
+		ret
+ReduceLives endp
+
+Level2 proc
+
+		inc levelnum
+		mov boardx, 110
+		mov boardy, 190
+		mov width1, 65
+		mov ballx, 150
+		mov bally, 140
+		mov ballvx, 4
+		mov ballvy, -4
+		mov brickhitnum, 2
+		mov brickrem, 10
+		
+		call RandomColours
+		
+		mov ax, 0
+		mov i, ax
+		
+		mov si, offset brickhits
+		
+	l1:
+		mov ax, i
+		cmp ax, 10
+		jae l2
+		mov ax, 0
+		mov [si], ax
+		inc si
+		
+		inc i
+		jmp l1
+	
+	l2:
+		ret
+		
+Level2 endp	
+
+printLevel proc
+		mov ah, 02h
+		mov bx, 0
+		mov dh, 2
+		mov dl, 15
+		int 10h
+
+		lea dx, levelstring
+		mov ah, 09h
+		int 21h
+		
+		mov ah, 02h
+		mov bx, 0
+		mov dh, 2
+		mov dl, 21
+		int 10h
+		
+		mov dl, levelnum
+		mov ah, 02h
+		add dl, 48
+		int 21h
+
+		ret
+printLevel endp	
+
+Level3 proc
+
+		inc levelnum
+		mov boardx, 110
+		mov boardy, 190
+		mov ballx, 150
+		mov bally, 140
+		mov ballvx, 5
+		mov ballvy, -5
+		mov brickhitnum, 3
+		mov brickrem, 10
+		
+		call RandomColour2
+		
+		mov ax, 0
+		mov i, ax
+		
+		mov si, offset brickhits
+		mov di, offset brickcolour
+		
+	l1:
+		mov ax, i
+		cmp ax, 10
+		jae l2
+		
+		mov ax, 0
+		mov [si], ax		; brickhits = 0
+		
+		mov ax, [di]
+		cmp al, color5
+		jne color
+		mov ah, 0
+		mov al, brickhitnum
+		dec al
+		mov [si], ax		; brickhits of special brick = brickhitnum - 1
+		
+	color:
+		inc si
+		inc di
+		
+		inc i
+		jmp l1
+	
+	l2:
+
+		ret
+Level3 endp
+
+RandomColours proc
+		mov ax, 0
+		mov i, ax
+		mov si, offset brickcolour
+		
+	l1:	
+		mov ax, 10
+		cmp i, ax
+		jae l2
+		
+		mov ah, 2ch
+		int 21h
+		
+		mov al, dl
+		mov ah, 0
+		mov bl, 3
+		div bl
+		
+		cmp ah, 0
+		jne col1
+		mov al, color1
+		
+	col1:
+	
+		cmp ah, 1
+		jne col2
+		mov al, color2
+		
+	col2:	
+	
+		cmp ah, 2
+		jne col3
+		mov al, color3
+		
+	col3:
+
+		sub al, levelnum
+		mov [si], al
+		
+		inc si
+		
+		call delay
+		inc i
+		jmp l1
+		
+	L2:	
+
+		ret
+RandomColours endp	
+
+RandomColour2 proc
+
+		mov ax, 0
+		mov i, ax
+		mov si, offset brickcolour
+		
+	l1:	
+		mov ax, 10
+		cmp i, ax
+		jae l2
+		
+		mov ah, 2ch
+		int 21h             ; Random Number
+		
+		mov al, dl
+		mov ah, 0
+		mov bl, 4
+		div bl
+		
+		cmp ah, 0
+		jne col1
+		mov al, color1
+		
+	col1:
+	
+		cmp ah, 1
+		jne col2
+		mov al, color2
+		
+	col2:	
+	
+		cmp ah, 2
+		jne col3
+		mov al, color3
+		
+	col3:	
+	
+		cmp ah, 3
+		jne col4
+		mov al, color4
+		add al, levelnum
+		dec brickrem
+		
+	col4:
+
+		sub al, levelnum
+		mov [si], al
+		
+		inc si
+		
+		call delay
+		inc i
+		jmp l1
+		
+	L2:
+
+        mov ah, 2ch
+		int 21h
+
+        mov al, dl
+		mov ah, 0
+		mov bl, 10
+		div bl
+
+        mov si, offset brickcolour
+        mov al, ah
+        mov ah, 0
+        add si, ax
+        mov al, [si]
+        cmp al, color4    ; if fixed brick is replaced then increment bricks remaining
+        jne L3
+        inc brickrem
+
+    L3:
+        mov al, color5
+        mov [si], al        ; Add color5 to one random brick
+
+		ret
+RandomColour2 endp	
+
+incScore proc
+		mov di, offset brickcolour
+		mov ax, l
+		mov bx, 5
+		mul bx
+		add ax, i
+		
+		add di, ax
+		mov al, color1
+		cmp [di], al
+		jne sc1
+		
+		inc score2
+		
+	sc1:
+		mov al, color2
+		cmp [di], al
+		jne sc2
+		
+		inc score2
+		inc score2
+		
+	sc2:	
+		mov al, color3
+		cmp [di], al
+		jne sc3
+		
+		inc score2
+		inc score2
+		inc score2
+		
+	sc3:	
+		
+		dec brickrem
+
+		ret
+incScore endp	
+
+FileHandling proc
+
+		mov al, highscore
+		cmp al, score2
+		jbe l1
+		mov score2, al
+		
+	l1:
+
+		mov ah, 0			
+		mov al, score2
+		mov bl, 10			
+		div bl
+		
+		mov bh, 0
+		mov bl, ah
+		add bx, 48
+		mov i, bx
+		
+		mov bh, 0
+		mov bl, al
+		add bx, 48
+		mov j, bx
+
+		mov ah, 3ch				;to create a file
+		mov cx, 0
+		mov dx, offset file
+		int 21h
+
+		mov ah, 3dh				;to open a file
+		mov al, 2
+		mov dx, offset file
+		int 21h
+		mov handle, ax
+
+		
+		mov cx, 0				;to write a file
+		mov dx, 0
+
+		mov ah, 42h
+		mov al, 2
+		int 21h
+		
+		mov ah, 40h
+		mov bx, handle
+		mov cx, lengthof j
+		mov dx, offset j
+		
+		int 21h
+		
+		
+		mov cx, 0				;to write a file
+		mov dx, 0
+
+		mov ah, 42h
+		mov al, 2
+		int 21h
+		
+		mov ah, 40h
+		mov bx, handle
+		mov cx, lengthof i
+		mov dx, offset i
+		
+		int 21h
+		
+
+		mov ah, 3Fh				;to read a file
+		mov cx, lengthof j
+		mov dx, offset buffer
+		mov bx, handle
+		int 21h
+		
+		mov ah, 3Fh				;to read a file
+		mov cx, lengthof i
+		mov dx, offset buffer
+		mov bx, handle
+		int 21h
+
+		mov ah, 3eh				;to close a file
+		mov bx, handle
+		int 21h
+		
+		ret
+FileHandling endp
+
+destroyBricks proc
+        mov ax, brickrem
+        mov j, ax
+        cmp ax, 5
+        jbe l1
+        mov ax, 5
+        mov j, ax
+
+    l1:
+
+        mov ax, 0
+        mov i, ax
+    l2:
+        mov ax, j
+        cmp i, ax               ; i < bricksrem
+        jae l3
+
+        mov ah, 2ch
+		int 21h                 ; Random Number
+		
+		mov al, dl
+		mov ah, 0
+		mov bl, 10
+		div bl                  ; Random number between 0-9 in ah
+
+        mov si, offset brickcolour
+        mov di, offset brickhits
+        mov al, ah
+        mov ah, 0
+        add si, ax
+        add di, ax
+
+        mov al, color4
+        cmp [si], al            ; If brickcolour != color4
+        je l2
+
+        mov al, [di]
+        cmp al, brickhitnum     ; If brick is not already destroyed
+        je l2
+
+        mov al, brickhitnum
+        mov [di], al
+        dec brickrem            ; Destroy brick
+
+        inc score2
+        inc score2              ; Increase Score
+
+        inc i
+        jmp l2
+    l3:
+
+        ret
+destroyBricks endp
+
+readFile proc
+		mov ah, 3dh				;to open a file
+		mov al, 2
+		mov dx, offset file
+		int 21h
+		mov handle, ax
+
+		mov ah, 3fh  
+		lea dx, offset buffer
+		mov cx, 2 ; Read 1 Byte
+		mov bx, handle
+		int 21h
+		
+		mov si, offset buffer
+		mov al, [si]
+		sub al, 48
+		mov bl, 10
+		mul bl
+		inc si
+		mov bl, [si]
+		add al, bl
+		sub al, 48
+		
+		mov highscore, al
+
+		mov ah, 3eh				;to close a file
+		mov bx, handle
+		int 21h
+
+		ret
+readFile endp
+
+; Page 1
+
+page1 proc
+		call block1
+		call block2
+		call block3
+		call block4
+		call block5
+						
+						
+	label1:
+		mov ah,02h
+		mov bx,0
+		mov dh,10 ;row
+		mov dl,10 ;col
+		int 10h
+
+		mov dx,offset pg1name1
+		mov ah,09h
+		int 21h
+
+
+		mov ah,02h
+		mov bx,0
+		mov dh,13 ;row
+		mov dl,13 ;col
+		int 10h
+
+		mov dx,offset msg1
+		mov ah,09h
+		int 21h
+
+		mov si, offset pg1name2
+		
+	la1:
+		mov ah, 1
+		int 21h
+		cmp al, 13
+		JE endpage1
+		mov [si], al
+		inc si
+		jmp la1
+
+
+
+	endpage1:
+	
+			mov dl, 65
+			mov ah, 02h
+			int 21h
+			
+			ret
+
+page1 endp
+
+block1 proc
+
+	l1:
+		mov bx, 60
+		mov var1, bx
+
+	l2:
+		mov ah, 0ch
+		mov al, 1
+		mov cx, var1
+		mov dx, var2
+		int 10h
+		add var1, 1
+		inc bx
+		cmp bx, 90
+		JNE l2
+		JE l3
+
+	l3:
+		inc var2
+		mov bx, var2
+		cmp bx, 40
+		JNE l1
+
+		ret	
+block1 endp
+
+block2 proc
+
+	lab4:
+		mov var2, 50
+	l4:
+		mov bx, 100
+		mov var1, bx
+	l5:
+		mov ah, 0ch
+		mov al, 4
+		mov cx, var1
+		mov dx, var3
+		int 10h
+		add var1, 1
+		inc bx
+		cmp bx, 130
+		JNE l5
+		JE l6
+
+	l6:
+		inc var3
+		inc var2
+		mov bx, var2
+		cmp bx, 60
+		JNE l4
+
+
+		ret
+block2 endp
+
+block3 proc
+
+
+	lab7:
+		mov var2, 70
+		mov var3, 30
+	l7:
+		mov bx, 140
+		mov var1, bx
+	l8:
+		mov ah, 0ch
+		mov al, 14
+		mov cx, var1
+		mov dx, var3
+		int 10h
+		add var1, 1
+		inc bx
+		cmp bx, 170
+		JNE l8
+		JE l9
+
+	l9:
+		inc var3
+		inc var2
+		mov bx, var2
+		cmp bx, 80
+		JNE l7
+
+		ret 
+block3 endp
+
+block4 proc
+
+
+	lab10:
+		mov var2, 70
+		mov var3, 30
+	l10:
+		mov bx, 180
+		mov var1, bx
+	l11:
+		mov ah, 0ch
+		mov al, 10
+		mov cx, var1
+		mov dx, var3
+		int 10h
+		add var1, 1
+		inc bx
+		cmp bx, 210
+		JNE l11
+		JE l12
+
+	l12:
+		inc var3
+		inc var2
+		mov bx, var2
+		cmp bx, 80
+		JNE l10
+
+		ret 
+block4 endp
+
+block5 proc
+
+	lab13:
+		mov var2, 70
+		mov var3, 30
+	l13:
+		mov bx, 220
+		mov var1, bx
+	l14:
+		mov ah, 0ch
+		mov al, 5
+		mov cx, var1
+		mov dx, var3
+		int 10h
+		add var1, 1
+		inc bx
+		cmp bx, 250
+		JNE l14
+		JE l15
+
+	l15:
+		inc var3
+		inc var2
+		mov bx, var2
+		cmp bx, 80
+		JNE l13
+
+
+
+		ret
+block5 endp
+
+; Instructions
+
+instruction proc
+
+		mov ah, 06h
+		mov al, 0
+		mov cx, 0
+		mov dh, 80
+		mov dl, 80
+		mov bh, 0
+		int 10h
+
+		mov ah,02h
+		mov bx,0
+		mov dh,3;col
+		mov dl,14 ;row
+		int 10h
+
+		mov dx,offset instruct1
+		mov ah,09h
+		int 21h
+
+		;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; first instruction
+		mov ah,02h
+		mov bx,0
+		mov dh,7;col
+		mov dl,0 ;row
+		int 10h
+
+		mov dx,offset instruct2
+		mov ah,09h
+		int 21h
+
+		;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; second instruction
+
+		mov ah,02h
+		mov bx,0
+		mov dh,10;col
+		mov dl,0 ;row
+		int 10h
+
+		mov dx,offset instruct3
+		mov ah,09h
+		int 21h
+
+
+		;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; third instruction
+
+		mov ah,02h
+		mov bx,0
+		mov dh,13;col
+		mov dl,0 ;row
+		int 10h
+
+		mov dx,offset instruct4
+		mov ah,09h
+		int 21h
+
+
+
+		;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; last instruction
+
+		mov ah,02h
+		mov bx,0
+		mov dh,20;col
+		mov dl,14 ;row
+		int 10h
+
+		mov dx,offset instruct5
+		mov ah,09h
+		int 21h
+
+	start:
+		mov ah, 0h
+		int 16h
+		mov al, ah
+		cmp al, 1ch
+		jne start
+
+		ret
+instruction endp
+
+; Still
+
+pause proc
+
+		mov ah, 06h
+		mov al, 0
+		mov cx, 0
+		mov dh, 80
+		mov dl, 80
+		mov bh, 0
+		int 10h
+		
+		mov ah,02h
+		mov bx,0
+		mov dh,10;col
+		mov dl,12 ;row
+		int 10h
+
+		mov dx, offset still
+		mov ah,09h
+		int 21h
+
+	label1:
+		mov ah, 0h
+		int 16h
+		mov al, ah
+		cmp al, 39h
+		jne label1
+		mov al, 0
+		mov ispaused, al
+
+		ret 
+pause endp
+
+; Page 2
+
+page2 proc
+
+		mov ah, 06h
+		mov al, 0
+		mov cx, 0
+		mov dh, 80
+		mov dl, 80
+		mov bh, 0
+		int 10h
+		
+		mov ax, 0
+		mov options, 0
+
+start:
+				call rect1
+				call rect2
+				call rect3
+				call rect4
+				call rect5
+
+
+				
+				call rect1
+				call downkey
+				call rect1
+				call rect3
+				call rect4
+				call rect5
+				call capital1
+				call rect2
+				call rect3
+				call rect4
+				call rect5
+				call downkey
+				call rect1
+				call rect3
+				call rect2
+				call rect4
+				call rect5
+				call downkey
+				call rect2
+				call rect1
+				call rect4
+				call rect5
+				call rect3
+				call capital2
+				call downkey
+				call rect5
+				call rect4
+				call rect3
+				call capital3
+				call rect5
+				call rect2
+				call rect1
+				call downkey
+				call rect4
+				call rect5
+				call capital4
+				call rect5
+				call rect3
+				call rect2
+				call rect1
+				call downkey
+				call rect5
+				call capital5
+				call rect4
+				call rect3
+				call rect2
+				call rect1
+				call downkey
+				
+				jmp start
+
+		endpg2::
+		
+		jmp exitmenu
+		;ret
+page2 endp
+
+
+rect1 proc
+mov bx, 0
+mov s1, 30		
+l1:
+mov ah, 0ch
+mov al, 14
+mov cx, 90
+mov dx, s1
+int 10h
+add s1, 1
+inc bx
+cmp bx, 20
+JNE l1
+JE label2
+
+label2:
+mov s1,90
+mov bx,0
+l2:
+mov ah,0ch
+mov al,14
+mov cx,s1 
+mov dx,30 
+int 10h
+add s1,1
+inc bx
+cmp bx,130
+jne l2
+je label3
+
+
+label3:
+mov s1,90
+mov bx,0
+l3:
+mov ah,0ch
+mov al,14
+mov cx,s1 
+mov dx,50 
+int 10h
+add s1,1
+inc bx
+cmp bx,130
+jne l3
+je label4
+
+
+label4:
+mov s1,30
+mov bx,0
+l5:
+mov ah,0ch
+mov al,14
+mov cx,220 
+mov dx,s1 
+int 10h
+add s1,1
+inc bx
+cmp bx,20
+JNE l5
+
+mov ah,02h
+mov bx,0
+mov dh,0 ;col
+mov dl,35 ;row
+int 10h
+mov dx,offset pg1name2
+mov ah,09h
+int 21h
+
+mov ah,02h
+mov bx,0
+mov dh,5 ;col
+mov dl,16 ;row
+int 10h
+mov dx,offset pg2name2
+mov ah,09h
+int 21h
+
+		ret
+rect1 endp
+
+
+rect2 proc
+
+mov bx,0
+mov s1,90
+mov s2, 60
+
+l6:
+mov ah, 0ch
+mov al, 14
+mov cx, 90
+mov dx, s2
+int 10h
+add s2, 1
+inc bx
+cmp bx, 20
+JNE l6
+JE label7
+
+label7:
+mov s1,90
+mov bx,0
+l8:
+mov ah,0ch
+mov al,14
+mov cx,s1 
+mov dx,60 
+int 10h
+add s1,1
+inc bx
+cmp bx,130
+jne l8
+je label9
+
+label9:
+mov s1,90
+mov bx,0
+l10:
+mov ah,0ch
+mov al,14
+mov cx,s1 
+mov dx,80 
+int 10h
+add s1,1
+inc bx
+cmp bx,130
+jne l10
+je label11
+
+
+label11:
+mov s1,60
+mov bx,0
+l11:
+mov ah,0ch
+mov al,14
+mov cx,220 
+mov dx,s1 
+int 10h
+add s1,1
+inc bx
+cmp bx,20
+JNE l11
+
+
+mov ah,02h
+mov bx,0
+mov dh,9 ;col
+mov dl,17 ;row
+int 10h
+mov dx,offset pg2name3
+mov ah,09h
+int 21h
+
+
+
+	ret
+rect2 endp
+
+rect3 proc
+
+mov s1,90
+mov bx,0
+mov s3, 90
+l13:
+mov ah, 0ch
+mov al, 14
+mov cx, 90
+mov dx, s3
+int 10h
+add s3, 1
+inc bx
+cmp bx, 20
+JNE l13
+JE label14
+
+
+label14:
+mov s1,90
+mov bx,0
+l15:
+mov ah,0ch
+mov al,14
+mov cx,s1 
+mov dx,90 
+int 10h
+add s1,1
+inc bx
+cmp bx,130
+jne l15
+je label16
+
+label16:
+mov s1,90
+mov bx,0
+l16:
+mov ah,0ch
+mov al,14
+mov cx,s1 
+mov dx,110 
+int 10h
+add s1,1
+inc bx
+cmp bx,130
+jne l16
+je label17
+
+
+label17:
+mov s1,90
+mov bx,0
+l17:
+mov ah,0ch
+mov al,14
+mov cx,220 
+mov dx,s1 
+int 10h
+add s1,1
+inc bx
+cmp bx,20
+JNE l17
+
+
+mov ah,02h
+mov bx,0
+mov dh,12 ;col
+mov dl,14 ;row
+int 10h
+mov dx,offset pg2name4
+mov ah,09h
+int 21h
+
+
+	ret 
+rect3 endp
+
+rect4 proc
+
+mov s1,90
+mov bx,0
+mov s4, 120
+
+l19:
+mov ah, 0ch
+mov al, 14
+mov cx, 90
+mov dx, s4
+int 10h
+add s4, 1
+inc bx
+cmp bx, 20
+JNE l19
+JE label20
+
+label20:
+mov s1,90
+mov bx,0
+l20:
+mov ah,0ch
+mov al,14
+mov cx,s1 
+mov dx,120 
+int 10h
+add s1,1
+inc bx
+cmp bx,130
+jne l20
+je label21
+
+
+label21:
+mov s1,90
+mov bx,0
+l21:
+mov ah,0ch
+mov al,14
+mov cx,s1 
+mov dx,140 
+int 10h
+add s1,1
+inc bx
+cmp bx,130
+jne l21
+je label22
+
+label22:
+mov s1,120
+mov bx,0
+l22:
+mov ah,0ch
+mov al,14
+mov cx,220 
+mov dx,s1 
+int 10h
+add s1,1
+inc bx
+cmp bx,20
+JNE l22
+
+
+mov ah,02h
+mov bx,0
+mov dh,16 ;col
+mov dl,15 ;row
+int 10h
+mov dx,offset pg2name5
+mov ah,09h
+int 21h
+		
+ret 
+rect4 endp
+
+
+rect5 proc
+
+mov s1,90
+mov bx,0
+mov s5, 150
+
+l24:
+mov ah, 0ch
+mov al, 14
+mov cx, 90
+mov dx, s5
+int 10h
+add s5, 1
+inc bx
+cmp bx, 20
+JNE l24
+JE label25
+
+label25:
+mov s1,90
+mov bx,0
+l25:
+mov ah,0ch
+mov al,14
+mov cx,s1 
+mov dx,150 
+int 10h
+add s1,1
+inc bx
+cmp bx,130
+jne l25
+je label26
+
+
+label26:
+mov s1,90
+mov bx,0
+l26:
+mov ah,0ch
+mov al,14
+mov cx,s1 
+mov dx,170 
+int 10h
+add s1,1
+inc bx
+cmp bx,130
+jne l26
+je label27
+
+
+label27:
+mov s1,150
+mov bx,0
+l27:
+mov ah,0ch
+mov al,14
+mov cx,220 
+mov dx,s1 
+int 10h
+add s1,1
+inc bx
+cmp bx,20
+JNE l27
+
+
+
+mov ah,02h
+mov bx,0
+mov dh,20 ;col
+mov dl,17 ;row
+int 10h
+mov dx,offset pg2name6
+mov ah,09h
+int 21h
+
+
+	ret
+rect5 endp
+
+
+downkey proc
+
+l1:
+
+
+
+
+;which key pressed
+mov ah, 0h
+int 16h
+mov al, ah
+cmp al, 50h
+JNE endpg2
+
+
+down:
+mov ah, 06h
+mov al, 0
+mov cx, 0
+mov dh, 80
+mov dl, 80
+mov bh, 0
+int 10h
+
+inc y 
+mov ah, 0ch
+mov al, 0ch
+mov cx, x
+mov dx, y
+
+inc options
+mov ax, options
+cmp ax, 7
+jne enddown
+mov ax, 0
+mov options, ax
+
+
+enddown:
+	ret 
+downkey endp
+
+
+
+capital1 proc
+
+
+mov si, offset pg2name2
+mov cx, lengthof pg2name2
+
+mov ah,02h
+mov bx,0
+mov dh,5 ;col
+mov dl,16 ;row
+int 10h
+
+
+l1:
+mov al, [si]
+mov dl, al
+sub dl, 32
+inc si
+mov ah, 2
+int 21h
+loop l1
+
+
+
+ret
+capital1 endp
+
+
+capital2 proc
+mov bx,0
+mov s1,90
+
+mov si, offset pg2name3
+mov cx, lengthof pg2name3
+
+mov ah,02h
+mov bx,0
+mov dh,9 ;col
+mov dl,17 ;row
+int 10h
+
+l1:
+mov al, [si]
+mov dl, al
+sub dl, 32
+inc si
+mov ah, 2
+int 21h
+loop l1
+
+	ret 
+capital2 endp
+
+
+capital3 proc
+mov bx,0
+mov s1,90
+
+mov si, offset pg2name4
+mov cx, lengthof pg2name4
+
+mov ah,02h
+mov bx,0
+mov dh,12 ;col
+mov dl,14 ;row
+int 10h
+
+l1:
+mov al, [si]
+mov dl, al
+sub dl, 32
+inc si
+mov ah, 2
+int 21h
+loop l1
+
+	ret 
+capital3 endp
+
+
+capital4 proc
+mov bx,0
+mov s1,90
+
+mov si, offset pg2name5
+mov cx, lengthof pg2name5
+
+mov ah,02h
+mov bx,0
+mov dh,16 ;col
+mov dl,15 ;row
+int 10h
+
+l1:
+mov al, [si]
+mov dl, al
+sub dl, 32
+inc si
+mov ah, 2
+int 21h
+loop l1
+
+	ret 
+capital4 endp
+
+capital5 proc
+mov bx,0
+mov s1,90
+
+mov si, offset pg2name6
+mov cx, lengthof pg2name6
+
+mov ah,02h
+mov bx,0
+mov dh,20 ;col
+mov dl,17 ;row
+int 10h
+
+l1:
+mov al, [si]
+mov dl, al
+sub dl, 32
+inc si
+mov ah, 2
+int 21h
+loop l1
+
+	ret 
+capital5 endp
+
+; Win
+
+winner proc
+
+mov ah, 06h
+mov al, 0
+mov cx, 0
+mov dh, 80
+mov dl, 80
+mov bh, 0
+int 10h
+
+call GameScore
+
+label1:
+mov ah,02h
+mov bx,0
+mov dh,10;col
+mov dl,12 ;row
+int 10h
+
+mov dx,offset winname1
+mov ah,09h
+int 21h
+
+mov ah,02h
+mov bx,0
+mov dh,13;col
+mov dl,14 ;row
+int 10h
+
+mov dx,offset winname2
+mov ah,09h
+int 21h
+
+
+	ret 
+winner endp
+
+end main
